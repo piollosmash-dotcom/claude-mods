@@ -1,0 +1,6 @@
+{
+  "name": "mods-locali",
+  "description": "Mod personali di Claude Code",
+  "owner": { "name": "Aris Colombo" },
+  "plugins": [{ "name": "barra-sessione", "source": "./barra-sessione" }]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "barra-sessione",
+  "version": "0.1.0",
+  "description": "Riga di stato sopra la casella: cache, contesto, limiti 5h/settimana, token e costo, con Handoff e Replay; e il comando /token",
+  "types": "./types/index.d.ts"
+}
