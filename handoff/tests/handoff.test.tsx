@@ -24,13 +24,13 @@ const avvisi = (on: On) => {
     await aspetta(regola)
     await orologio.settle()
   }
-  return { ricevuti, aspetta: finito }
+  return { ricevuti, aspetta: finito, orologio }
 }
 
 test('/handoff riassume, pulisce la chat e mette la bozza nella casella', async ($, on) => {
   const ordine: string[] = []
   let bozza = ''
-  const { aspetta } = avvisi(on)
+  const { aspetta, orologio } = avvisi(on)
 
   on('model.fork', async () => {
     ordine.push('fork')
@@ -47,10 +47,39 @@ test('/handoff riassume, pulisce la chat e mette la bozza nella casella', async 
   })
 
   await $.command.run(HANDOFF)
+  await orologio.settle()
+  await orologio.advance(300)
   await aspetta(/Handoff pronto/)
 
   expect(ordine).toEqual(['fork', 'clear', 'fill'])
   expect(bozza).toBe('# Handoff sessione — prova')
+})
+
+test('se il /clear si mangia la bozza, resta il pulsante «Incolla handoff»', async ($, on) => {
+  let bozza = ''
+  let casellaPronta = false
+  const { aspetta, orologio } = avvisi(on)
+
+  on('model.fork', async () => ({ value: { isAnswered: true, text: '# Handoff sessione — prova', usage: {} } }) as never)
+  on('command.run', { command: 'clear' }, async () => ({ text: '' }))
+  on('prompt.fill', async ($, e) => {
+    if (!casellaPronta) return { isFilled: false, text: '' } as never
+    bozza = e.text
+    return { isFilled: true, text: e.text } as never
+  })
+
+  await $.command.run(HANDOFF)
+  await orologio.settle()
+  for (const ms of [300, 700, 1500]) await orologio.advance(ms)
+  await aspetta(/Incolla handoff/)
+  expect(bozza).toBe('')
+
+  casellaPronta = true
+  const ui = await $.ui.mount({ plugin: 'handoff', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false } } as never)
+  await ui.press({ key: 'incolla' } as never)
+  await aspetta(/Handoff pronto/)
+  expect(bozza).toBe('# Handoff sessione — prova')
+  await ui.unmount()
 })
 
 test('senza conversazione non pulisce nulla', async ($, on) => {

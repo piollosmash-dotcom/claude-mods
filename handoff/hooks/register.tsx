@@ -5,8 +5,11 @@ import type { Fase } from '../types'
 
 const fase = atom({ plugin: 'handoff', key: 'fase' } as const, 'pronto' as Fase)
 const percentuale = atom({ plugin: 'handoff', key: 'percentuale' } as const, null)
+const inAttesa = atom({ plugin: 'handoff', key: 'inAttesa' } as const, false)
 
 const ULTIMO = 'ultimo-handoff'
+// Resta vero dal /clear fino al primo invio: dopo il /clear la sessione cambia, lo store no.
+const ATTESA = 'handoff-in-attesa'
 
 export const PROMPT_HANDOFF = `Scrivi un prompt di passaggio di consegne (handoff) per una NUOVA chat che riparte da zero e non sa nulla di questa conversazione.
 Rispondi SOLO con il prompt, in italiano, in Markdown, senza preamboli né commenti finali. Usa questa struttura:
@@ -40,6 +43,23 @@ async function aggiornaContesto($: EngineInterface) {
   await update($, percentuale, () => context.percent ?? null)
 }
 
+async function riempiBozza($: EngineInterface): Promise<boolean> {
+  const ultimo = await $.store.get(ULTIMO)
+  if (typeof ultimo !== 'string') return false
+  const riempito = await $.prompt.fill({ text: ultimo, mode: 'replace' })
+  if (riempito.isFilled) $.ui.toast('Handoff pronto: rileggi la bozza e premi Invio.')
+  return riempito.isFilled
+}
+
+// Il /clear svuota la casella dopo aver finito: la bozza va messa quando la nuova chat è su.
+async function riempiDopoClear($: EngineInterface) {
+  for (const attesa of [300, 700, 1500]) {
+    await $.clock.sleep(attesa)
+    if (await riempiBozza($)) return true
+  }
+  return false
+}
+
 async function eseguiHandoff($: EngineInterface): Promise<Esito> {
   if ((await read($, fase)) !== 'pronto') {
     return { ok: false, messaggio: 'Un handoff è già in corso.' }
@@ -58,15 +78,15 @@ async function eseguiHandoff($: EngineInterface): Promise<Esito> {
     }
     const riassunto = risposta.text.trim()
     await $.store.set(ULTIMO, riassunto)
+    await $.store.set(ATTESA, true)
+    await update($, inAttesa, () => true)
 
     await update($, fase, () => 'pulisco')
     await $.command.run({ command: 'clear' })
-    const riempito = await $.prompt.fill({ text: riassunto, mode: 'replace' })
-    if (!riempito.isFilled) {
-      $.ui.toast('Chat pulita, ma la casella non ha accettato la bozza: usa /handoff ultimo.')
-      return { ok: false, messaggio: 'Bozza non inserita: usa /handoff ultimo.' }
+    if (!(await riempiDopoClear($))) {
+      $.ui.toast('Chat pulita: premi «Incolla handoff» o usa /handoff ultimo.')
+      return { ok: false, messaggio: 'Bozza non inserita: premi «Incolla handoff» o usa /handoff ultimo.' }
     }
-    $.ui.toast('Handoff pronto: rileggi la bozza e premi Invio.')
     return { ok: true, messaggio: 'Handoff pronto nella casella.' }
   } catch (errore) {
     const testo = errore instanceof Error ? errore.message : String(errore)
@@ -96,14 +116,46 @@ export const register: Register = on => {
       if (typeof ultimo !== 'string') {
         return { text: 'Nessun handoff salvato finora.' }
       }
-      const riempito = await $.prompt.fill({ text: ultimo, mode: 'replace' })
+      // La casella si libera solo quando il comando ha finito: la bozza va messa dopo.
+      void $.clock.sleep(200).then(() => riempiBozza($))
 
-      return { text: riempito.isFilled ? 'Ultimo handoff rimesso nella casella.' : ultimo }
+      return { text: 'Ultimo handoff in arrivo nella casella.' }
     }
     // Il /clear va lanciato fuori da questo hook: il comando non può aspettare un altro comando.
     void eseguiHandoff($)
 
     return { text: 'Handoff avviato: scrivo il riassunto, poi pulisco la chat e lo metto nella casella.' }
+  })
+
+  // Rete di sicurezza: se il riempimento lanciato prima del /clear si perde, lo rifà la nuova chat.
+  on('classic.SessionStart', async ($, e, next) => {
+    const risultato = await next(e)
+    if (e.source === 'clear') {
+      void $.store
+        .get(ATTESA)
+        .then(async attesa => {
+          if (attesa !== true) return
+          await update($, inAttesa, () => true)
+          await riempiDopoClear($)
+        })
+        .catch(() => undefined)
+    }
+
+    return risultato
+  })
+
+  // Inviata la bozza (o un altro messaggio), il pulsante «Incolla handoff» sparisce.
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      if (await read($, inAttesa)) {
+        await update($, inAttesa, () => false)
+        void $.store.delete(ATTESA).catch(() => undefined)
+      }
+    } catch {
+      // Un errore qui non deve mai bloccare l'invio.
+    }
+
+    return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
@@ -120,6 +172,7 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const stato = await read($, fase)
     const pieno = await read($, percentuale)
+    const bozzaInAttesa = await read($, inAttesa)
     const colore = pieno === null ? undefined : pieno >= 75 ? 'red' : pieno >= 50 ? 'yellow' : 'green'
     const etichetta =
       stato === 'riassumo' ? 'Riassumo…' : stato === 'pulisco' ? 'Pulisco…' : 'Handoff'
@@ -138,6 +191,9 @@ export const register: Register = on => {
             else if (stato === 'pronto') void eseguiHandoff($)
           }}
         />
+        {bozzaInAttesa && stato === 'pronto' && (
+          <Button key="incolla" label="Incolla handoff" hotkey="i" onPress={() => void riempiBozza($)} />
+        )}
       </Box>
     )
   })

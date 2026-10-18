@@ -1,6 +1,6 @@
 {
   "name": "handoff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Riassume la sessione come prompt, pulisce la chat e mette il riassunto nella casella come bozza",
   "types": "./types/index.d.ts"
 }
