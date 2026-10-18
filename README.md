@@ -21,6 +21,7 @@ Quando la chat inizia a saturarsi, un clic e riparti da zero senza perdere il fi
 - pulsante **Handoff** sopra la casella (scorciatoia `h`), con la percentuale di contesto occupata: verde, gialla da 50%, rossa da 75%;
 - scrive un prompt di passaggio di consegne (dove eravamo, decisioni, file chiave, stato, prossimi passi, domande aperte), fa `/clear` e lo mette nella casella come bozza: lo rileggi e premi Invio;
 - `/handoff` fa lo stesso da comando; `/handoff ultimo` rimette nella casella l'ultimo handoff salvato.
+- se dopo il `/clear` la casella è vuota, compare il pulsante **Incolla handoff** (scorciatoia `i`), che resta finché non invii il messaggio.
 
 `barra-sessione` ha già un suo pulsante Handoff: se le installi tutte e due vedrai due pulsanti.
 
