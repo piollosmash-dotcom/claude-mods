@@ -15,6 +15,8 @@ const isHandingOff = atom(
   { plugin: 'barra-sessione', key: 'isHandingOff' } as const,
   false,
 )
+// L'ultimo riassunto non ancora finito nella casella: lo rimette il pulsante «Incolla handoff».
+const pendingHandoff = atom({ plugin: 'barra-sessione', key: 'pendingHandoff' } as const, null)
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -233,12 +235,19 @@ async function handoff($: EngineInterface): Promise<void> {
       $.ui.toast('Non ho potuto pulire la chat: riassunto nella casella, lancia /clear e incollalo.')
       return
     }
-    const filled = await $.prompt.fill({ text: summary })
-    $.ui.toast(
-      filled.isFilled
-        ? 'Chat pulita: il riassunto è nella casella come bozza.'
-        : 'Chat pulita, ma la casella non ha preso la bozza.',
-    )
+    // Il /clear svuota la casella dopo aver finito: la bozza va messa quando la nuova chat è su.
+    let filled = false
+    for (const wait of [300, 700, 1500]) {
+      await $.clock.sleep(wait)
+      filled = (await $.prompt.fill({ text: summary })).isFilled
+      if (filled) break
+    }
+    if (filled) {
+      $.ui.toast('Chat pulita: il riassunto è nella casella come bozza.')
+    } else {
+      await update($, pendingHandoff, () => summary)
+      $.ui.toast('Chat pulita: premi «Incolla handoff» per mettere il riassunto nella casella.')
+    }
   } finally {
     await update($, isHandingOff, () => false)
   }
@@ -313,7 +322,11 @@ export const register: Register = on => {
 
     const { Box, Button, Text } = $.ui.resolve(e)
     const s = await summarize($)
-    const [replay, busy] = await Promise.all([read($, hasReplay), read($, isHandingOff)])
+    const [replay, busy, pending] = await Promise.all([
+      read($, hasReplay),
+      read($, isHandingOff),
+      read($, pendingHandoff),
+    ])
     const rest = [
       contextLabel(s.usage),
       ...limitLabels(s.usage, s.now),
@@ -337,6 +350,15 @@ export const register: Register = on => {
             key="handoff"
             label="Handoff"
             onPress={() => (e.props.isWorking ? $.ui.toast('Aspetta che il turno finisca.') : handoff($))}
+          />
+        )}
+        {pending !== null && (
+          <Button
+            key="incolla"
+            label="Incolla handoff"
+            onPress={async () => {
+              if ((await $.prompt.fill({ text: pending })).isFilled) await update($, pendingHandoff, () => null)
+            }}
           />
         )}
         {replay && (

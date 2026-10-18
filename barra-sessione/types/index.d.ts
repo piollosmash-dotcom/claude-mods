@@ -12,6 +12,7 @@ declare module 'claude-code' {
       tokens: Tokens
       hasReplay: boolean
       isHandingOff: boolean
+      pendingHandoff: string | null
     }
   }
 }
